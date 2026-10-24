@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3-Wire Start/Stop Trainer — 24 VDC</title>
+<!--
+  24 VDC THREE-WIRE START/STOP TRAINER
+  ------------------------------------------------------------------
+  Single file, no dependencies. Open index.html in any modern browser.
+
+  File map
+    <style>   theme + layout + SVG state classes
+    <script>
+      1. SIM CORE   pure circuit model (no DOM). Nodes, edges, solver.
+      2. SCHEMATIC  SVG built from the WIRES / CONTACTS / TERMS tables.
+      3. CONTENT    FAULTS, SCENARIOS, TRACE_STEPS, TERMMAP (edit these
+                    tables to add faults, quiz scenarios or lesson steps).
+      4. UI         render(), control panel, multimeter, tabs.
+-->
+<style>
+:root{
+  --bg:#0d1014; --card:#151a21; --card2:#1b222b; --line:#28313d;
+  --text:#e7edf4; --muted:#8a97a8;
+  --blue:#29a9ff; --red:#ff4d4f; --green:#2fd67b; --amber:#ffb020; --gold:#ffd24a;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{height:100vh;display:grid;grid-template-rows:auto 1fr;background:var(--bg);color:var(--text);
+  font:14px/1.45 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+header{display:flex;align-items:center;gap:18px;padding:10px 18px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#171d25,#12161c)}
+header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+header h1 small{color:var(--muted);font-weight:400;margin-left:8px}
+.leds{margin-left:auto;display:flex;gap:14px;font:600 11px var(--mono);color:var(--muted)}
+.leds span{display:flex;align-items:center;gap:6px}
+.led{width:10px;height:10px;border-radius:50%;background:#2a323d;box-shadow:inset 0 0 2px #000;transition:all .15s}
+.led.g{background:var(--green);box-shadow:0 0 8px var(--green)}
+.led.r{background:var(--red);box-shadow:0 0 8px var(--red)}
+.led.b{background:var(--blue);box-shadow:0 0 8px var(--blue)}
+
+main{display:grid;grid-template-columns:3fr 2fr;gap:14px;padding:14px;min-height:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px}
+.left{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.schem{flex:1;min-height:0;padding:6px}
+.schem svg{width:100%;height:100%;display:block;user-select:none}
+.statusbar{border-top:1px solid var(--line);padding:9px 14px;background:var(--card2);border-radius:0 0 12px 12px}
+#status{font-weight:600}
+#log{color:var(--muted);font:12px var(--mono);margin-top:3px;min-height:34px}
+#log div:first-child{color:#c3cedb}
+.right{display:flex;flex-direction:column;gap:14px;min-height:0;overflow-y:auto;padding-right:2px}
+.card h2{font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:var(--muted);margin:0;
+  padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.card .body{padding:12px 14px}
+
+/* ---------- control panel ---------- */
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.pb{width:68px;height:68px;border-radius:50%;border:3px solid #0008;color:#fff;font:700 12px var(--mono);cursor:pointer;
+  box-shadow:0 5px 0 #0009,inset 0 2px 6px #fff3;transition:transform .06s,box-shadow .06s,filter .1s;touch-action:none}
+.pb.start{background:radial-gradient(circle at 35% 30%,#5df0a0,#149a52)}
+.pb.stop{background:radial-gradient(circle at 35% 30%,#ff8a8b,#c2181b)}
+.pb.down{transform:translateY(4px);box-shadow:0 1px 0 #0009,inset 0 2px 8px #0006;filter:brightness(1.2)}
+.btn{background:var(--card2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 11px;
+  font:600 12px inherit;cursor:pointer;transition:background .12s,border-color .12s}
+.btn:hover{background:#232c37;border-color:#3a4656}
+.btn.attn{border-color:var(--red);color:#ffb3b4;animation:pulse 1s infinite}
+.btn.primary{background:#103a5a;border-color:#1c5f93}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+@keyframes pulse{50%{box-shadow:0 0 0 3px #ff4d4f33}}
+.switch{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
+.switch input{appearance:none;width:44px;height:24px;border-radius:12px;background:#2a323d;position:relative;cursor:pointer;
+  transition:background .15s;margin:0}
+.switch input::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#cfd8e3;transition:left .15s}
+.switch input:checked{background:var(--blue)}
+.switch input:checked::after{left:23px}
+.faults{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+.faults label{display:flex;align-items:center;gap:7px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;
+  background:var(--card2);cursor:pointer;font-size:12.5px}
+.faults label.on{border-color:var(--red);background:#2a1618;color:#ffc9ca}
+.faults input{accent-color:var(--red)}
+.sechead{display:flex;align-items:center;justify-content:space-between;margin-top:14px;font:600 11px var(--mono);
+  color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+.keys{color:var(--muted);font:11px var(--mono);margin-top:8px}
+kbd{border:1px solid var(--line);border-radius:4px;padding:0 4px;background:var(--card2)}
+
+/* ---------- multimeter ---------- */
+.dmm{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:stretch}
+.lcd{min-width:190px;background:#0a1410;border:1px solid #1d3a2c;border-radius:8px;padding:8px 12px;text-align:right;
+  box-shadow:inset 0 0 18px #000}
+.lcd .big{font:700 34px/1 var(--mono);color:#6dffb0;text-shadow:0 0 10px #2fd67b88;white-space:nowrap}
+.lcd .big.warn{color:var(--amber);text-shadow:0 0 10px #ffb02088;font-size:24px;line-height:34px}
+.lcd .unit{font:600 11px var(--mono);color:#4fae7c;margin-top:4px}
+.dmmside{display:flex;flex-direction:column;gap:6px;justify-content:center}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg .btn.sel{background:#103a5a;border-color:var(--blue);color:#cfeaff}
+.leads{font:12px var(--mono);color:var(--muted)}
+.leads b.r{color:#ff7b7d}.leads b.k{color:#d5dde7}
+#meterHint{margin-top:8px;color:#b9c6d4;font-size:12.5px}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:10px 6px;
+  font:600 12.5px inherit;cursor:pointer}
+.tabs button.sel{color:var(--text);border-bottom-color:var(--blue)}
+.pane{display:none;padding:12px 14px}.pane.sel{display:block}
+.steps{list-style:none;margin:0;padding:0;counter-reset:s}
+.steps li{counter-increment:s;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;padding:8px 10px;cursor:pointer;background:var(--card2)}
+.steps li::before{content:counter(s);display:inline-block;width:20px;height:20px;border-radius:50%;background:#2a323d;
+  text-align:center;font:700 11px/20px var(--mono);margin-right:8px}
+.steps li.sel{border-color:var(--gold);background:#272213}
+.steps li.sel::before{background:var(--gold);color:#000}
+.steps li p{margin:6px 0 0 28px;color:#c9d3df;display:none}
+.steps li.sel p{display:block}
+.steps li .try{color:var(--gold)}
+.nav{display:flex;gap:8px;margin-bottom:10px;align-items:center}
+.nav .sp{margin-left:auto;color:var(--muted);font:12px var(--mono)}
+.scn{border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--card2);overflow:hidden}
+.scn>button{width:100%;text-align:left;background:none;border:0;color:var(--text);padding:9px 10px;font:600 13px inherit;cursor:pointer}
+.scn.solved>button::after{content:" ✓";color:var(--green)}
+.scn .in{display:none;padding:0 10px 10px}
+.scn.open .in{display:block}.scn.open{border-color:#3a4656}
+.scn .clue{color:#c9d3df;margin:0 0 8px}
+.opts{display:grid;gap:5px}
+.opts .btn{text-align:left;font-weight:500}
+.opts .btn.ok{border-color:var(--green);background:#11281c;color:#b9f5d4}
+.opts .btn.no{border-color:var(--red);background:#2a1618;color:#ffc9ca}
+.fb{margin:8px 0;padding:8px 10px;border-radius:8px;font-size:12.5px;display:none}
+.fb.ok{display:block;background:#11281c;border:1px solid #1f5a3b}
+.fb.no{display:block;background:#2a1618;border:1px solid #5d2426}
+.myst{border:1px dashed #3a4656;border-radius:8px;padding:10px;margin-bottom:12px}
+.myst select{background:var(--card2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px;max-width:100%}
+table.tm{width:100%;border-collapse:collapse;font-size:12.5px}
+table.tm th{text-align:left;color:var(--muted);font:600 10.5px var(--mono);letter-spacing:1px;text-transform:uppercase;padding:4px 6px}
+table.tm td{border-top:1px solid var(--line);padding:6px;vertical-align:middle}
+table.tm .note{color:var(--muted);font-size:11.5px}
+.tag{font:700 10px var(--mono);padding:1px 5px;border-radius:4px;border:1px solid var(--line);color:var(--muted)}
+.num{font:700 13px var(--mono);color:var(--amber);display:inline-block;min-width:30px}
+table.tm input{width:44px;background:#0d1014;border:1px solid var(--line);border-radius:6px;color:var(--text);
+  font:700 13px var(--mono);padding:4px;text-align:center;margin-right:4px}
+table.tm input.ok{border-color:var(--green);color:var(--green)}
+table.tm input.no{border-color:var(--red);color:var(--red)}
+.rules{color:#c9d3df;font-size:12.5px;margin:10px 0 0;padding-left:18px}
+.rules li{margin-bottom:3px}
+
+/* ---------- tooltip ---------- */
+#tip{position:fixed;z-index:10;max-width:290px;background:#0b0e12;border:1px solid #3a4656;border-radius:8px;padding:8px 10px;
+  font-size:12.5px;color:#dbe4ee;pointer-events:none;opacity:0;transition:opacity .12s;box-shadow:0 8px 24px #000a}
+#tip.show{opacity:1}
+
+/* ---------- SVG schematic ---------- */
+.wire,.sym{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;transition:stroke .18s}
+.v24{stroke:var(--blue)} .v0{stroke:#5d6979} .vf{stroke:#3d4654} .vx{stroke:#8a97a8}
+.blade{transition:transform .14s ease-out,stroke .18s}
+.blade.open{transform:rotate(-28deg)}
+.act{transition:transform .08s} .act.pressed{transform:translateX(6px)}
+.mech{stroke:#6b7888;stroke-width:1.5;stroke-dasharray:3 3;fill:none}
+.flow{fill:none;stroke:#e4f6ff;stroke-width:3;stroke-linecap:round;stroke-dasharray:3 11;opacity:0;pointer-events:none;
+  animation:flow .45s linear infinite;transition:opacity .15s}
+.flow.on{opacity:1}
+@keyframes flow{to{stroke-dashoffset:-14}}
+.coil{fill:#1b222b;stroke:#8a97a8;stroke-width:3;transition:all .18s}
+.coil.on{fill:#4a1517;stroke:var(--red);filter:drop-shadow(0 0 9px #ff4d4fcc)}
+.coiltxt{fill:var(--text);font:700 17px var(--mono);text-anchor:middle;pointer-events:none}
+.lbl{fill:var(--text);font:700 14px "Segoe UI",sans-serif}
+.sub{fill:var(--muted);font:11px "Segoe UI",sans-serif}
+.tlabel{fill:var(--amber);font:700 12px var(--mono);pointer-events:none}
+.hidenums .tlabel{opacity:0}
+.dot{fill:#8a97a8}
+.term{cursor:crosshair}
+.term circle.pin{fill:var(--bg);stroke:#c3cedb;stroke-width:2;transition:all .12s}
+.term:hover circle.pin{stroke:var(--gold);fill:#3a3214}
+.hit{fill:transparent;cursor:pointer}
+.fusebody{fill:#1b222b;stroke:#8a97a8;stroke-width:2}
+.fuse.blown .fusebody{stroke:var(--red)} .fuse.blown .link{opacity:0}
+.fuse.blown .burn{opacity:1} .burn{opacity:0;fill:var(--red);font:700 13px var(--mono);text-anchor:middle}
+.dsym{transition:transform .25s,opacity .2s;transform-origin:180px 605px}
+.dsym.rev{transform:rotate(180deg)} .dsym.gone{opacity:.2}
+.dtri{fill:#8a97a8;stroke:#8a97a8;stroke-width:2;stroke-linejoin:round}
+.psu{fill:#1b222b;stroke:#8a97a8;stroke-width:2;cursor:pointer}
+.motor{fill:#1b222b;stroke:#8a97a8;stroke-width:3;transition:all .2s}
+.motor.run{stroke:var(--green);filter:drop-shadow(0 0 8px #2fd67baa)}
+.rotor{transform-origin:790px 605px;stroke:#8a97a8;stroke-width:3;stroke-linecap:round}
+.rotor.run{animation:spin .7s linear infinite;stroke:var(--green)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.mark{display:none;pointer-events:none}.mark.on{display:block}
+.mark circle{fill:var(--bg);stroke:var(--red);stroke-width:2}
+.mark path{stroke:var(--red);stroke-width:2.5;stroke-linecap:round}
+.probe{fill:none;stroke-width:3;pointer-events:none;display:none}
+.probe.on{display:block}
+.probe.red{stroke:var(--red)} .probe.black{stroke:#e7edf4;stroke-dasharray:4 3}
+/* highlight classes used by Finger Trace (gold) and What-If (red) */
+.wire.trace,.trace .sym,.trace .coil,.trace .fusebody,.trace .dtri{stroke:var(--gold)!important;filter:drop-shadow(0 0 5px #ffd24acc)}
+.wire.culprit,.culprit .sym,.culprit .coil,.culprit .fusebody,.culprit .dtri,.culprit .psu{stroke:var(--red)!important;
+  filter:drop-shadow(0 0 6px #ff4d4f);animation:blink .7s infinite}
+@keyframes blink{50%{opacity:.45}}
+
+@media (max-width:1000px){
+  body{height:auto;display:block}
+  main{grid-template-columns:1fr}
+  .schem{height:78vh}
+  .right{overflow:visible}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>3-Wire Start/Stop Trainer <small>24 VDC control · I&amp;C troubleshooting practice</small></h1>
+  <div class="leds">
+    <span><i class="led" id="led_pwr"></i>24V</span>
+    <span><i class="led" id="led_f1"></i>F1</span>
+    <span><i class="led" id="led_ol"></i>OL</span>
+    <span><i class="led" id="led_cr"></i>CR</span>
+    <span><i class="led" id="led_m"></i>M</span>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT 60%: schematic (SVG contents are generated by buildSchematic()) -->
+  <section class="left card">
+    <div class="schem"><svg id="svg" viewBox="20 20 830 730" preserveAspectRatio="xMidYMid meet" aria-label="Three-wire start/stop schematic"></svg></div>
+    <div class="statusbar"><div id="status"></div><div id="log"></div></div>
+  </section>
+
+  <!-- RIGHT 40%: control panel, multimeter, lessons -->
+  <section class="right">
+    <div class="card">
+      <h2>Control Panel</h2>
+      <div class="body">
+        <div class="ctl">
+          <button class="pb start" id="btnStart" data-tip="START — momentary. Hold it down; CR should seal itself in so the circuit stays on when you let go.">START</button>
+          <button class="pb stop" id="btnStop" data-tip="STOP — momentary NC. Opens the rung and drops out CR.">STOP</button>
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <label class="switch" data-tip="Main 24 VDC supply. Switch OFF before using the continuity range."><input type="checkbox" id="swPower" checked>24 V supply</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn" id="btnReset" data-tip="Reset the overload relay (re-closes 95/96). The motor must NOT restart by itself.">Reset OL</button>
+              <button class="btn" id="btnTrip" data-tip="Simulate a motor overload: the OL relay trips and opens 95/96.">Trip OL</button>
+              <button class="btn" id="btnFuse" data-tip="Fit a new control fuse F1.">Replace F1</button>
+            </div>
+          </div>
+        </div>
+        <div class="keys">Keys: hold <kbd>S</kbd> start · hold <kbd>X</kbd> stop · <kbd>R</kbd> reset OL · <kbd>P</kbd> power</div>
+        <div class="sechead"><span>Fault injection</span><button class="btn" id="btnClear">Clear all</button></div>
+        <div class="faults" id="faults"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Multimeter</h2>
+      <div class="body">
+        <div class="dmm">
+          <div class="lcd"><div class="big" id="lcdBig">– – –</div><div class="unit" id="lcdUnit">V DC</div></div>
+          <div class="dmmside">
+            <div class="seg">
+              <button class="btn sel" id="modeV" data-tip="DC volts. Red lead goes where you click; black lead sits on 24 V− unless you move it.">V ⎓</button>
+              <button class="btn" id="modeC" data-tip="Continuity / ohms. Click two terminals. Supply must be OFF.">Ω ·))</button>
+              <button class="btn" id="moveBlack" data-tip="Next terminal click places the BLACK lead (to read across a device).">Move black</button>
+              <button class="btn" id="blackCom" data-tip="Put the black lead back on the 24 V− rail.">Black → 24V−</button>
+            </div>
+            <div class="leads" id="leads"></div>
+          </div>
+        </div>
+        <div id="meterHint"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tabs" id="tabs">
+        <button data-tab="trace" class="sel">Finger Trace</button>
+        <button data-tab="whatif">What-If</button>
+        <button data-tab="map">Blindfold Terminal Map</button>
+      </div>
+      <div class="pane sel" id="pane_trace"></div>
+      <div class="pane" id="pane_whatif"></div>
+      <div class="pane" id="pane_map"></div>
+    </div>
+  </section>
+</main>
+<div id="tip"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   1. SIM CORE — pure circuit model, no DOM access.
+   ---------------------------------------------------------------------
+   The circuit is a small graph:
+     NODES       every terminal / junction.
+     hardEdges   wires, the fuse and contacts (zero-ohm when closed).
+     softEdges   coils (they pass a meter reading but drop the voltage).
+   solve() floods 24 V out from 'P' and 0 V out from 'N' along hard
+   edges, then lets any leftover island "see" a potential through a
+   coil — that is what makes the classic readings come out right
+   (24 V across an open contact, 24 V on A2 with a lost neutral, ...).
+
+   Topology (matches the drawing):
+     P ─ F1 ─ OL 95/96 ─ STOP 11/12 ─ J2 ─┬─ START 13/14 ─┬─ J3 ─ CR A1/A2 ─ N
+                                          └─ CR 13/14 ────┘   ├─ diode K/A (across coil)
+                                                              └─ CR 23/24 ─ M A1/A2 ─ N
+
+   TO ADD A FAULT: add a flag to state.faults, use it in hardEdges()
+   or softEdges(), then describe it in the FAULTS table (section 3).
+   ===================================================================== */
+/*<SIM-CORE>*/
+const Sim = (() => {
+  const state = {
+    power: true, fuseBlown: false, olTripped: false,
+    startPressed: false, stopPressed: false,
+    crPicked: false,   // CR armature position (follows the coil after a short delay)
+    mPicked: false,    // M contactor armature position
+    faults: {
+      stopWire: false, sealOpen: false, diodeRev: false, diodeOpen: false, crCoilOpen: false,
+      neutralOpen: false, c2324Open: false, mCoilOpen: false, stopWelded: false, startStuck: false
+    }
+  };
+  const NODES = ['P','F1a','F1b','OL95','OL96','ST11','ST12','J2','PB13','PB14','CR13','CR14',
+                 'J3','CRA1','CRA2','DK','DA','CR23','CR24','MA1','MA2','N'];
+  const R_CR = 650, R_M = 180;   // coil resistances shown on the ohms range
+
+  // [nodeA, nodeB, isConducting]
+  function hardEdges(s) {
+    const f = s.faults;
+    return [
+      ['P','F1a', true],
+      ['F1a','F1b', !s.fuseBlown],                           // fuse F1
+      ['F1b','OL95', true],
+      ['OL95','OL96', !s.olTripped],                         // OL NC 95/96
+      ['OL96','ST11', !f.stopWire],                          // wire OL → STOP
+      ['ST11','ST12', !s.stopPressed || f.stopWelded],       // STOP NC 11/12
+      ['ST12','J2', true],
+      ['J2','PB13', true],
+      ['PB13','PB14', s.startPressed || f.startStuck],       // START NO 13/14
+      ['PB14','J3', true],
+      ['J2','CR13', true],
+      ['CR13','CR14', s.crPicked && !f.sealOpen],            // seal-in NO 13/14
+      ['CR14','J3', true],
+      ['J3','CRA1', true], ['J3','DK', true], ['J3','CR23', true],
+      ['CR23','CR24', s.crPicked && !f.c2324Open],           // CR NO 23/24
+      ['CR24','MA1', true],
+      ['MA2','N', true],
+      ['DA','CRA2', true],
+      ['CRA2','N', !f.neutralOpen]                           // CR A2 → 24 V−
+    ].filter(e => e[2]);
+  }
+  // [nodeA, nodeB, ohms]
+  function softEdges(s) {
+    const e = [];
+    if (!s.faults.crCoilOpen) e.push(['CRA1','CRA2', R_CR]);
+    if (!s.faults.mCoilOpen)  e.push(['MA1','MA2', R_M]);
+    return e;
+  }
+  function adjacency(edges, directed) {
+    const adj = {}; NODES.forEach(n => adj[n] = []);
+    edges.forEach(([a, b]) => { adj[a].push(b); adj[b].push(a); });
+    (directed || []).forEach(([a, b]) => adj[a].push(b));
+    return adj;
+  }
+  function flood(starts, adj) {
+    const seen = new Set(starts), q = [...starts];
+    while (q.length) { const n = q.pop(); for (const m of adj[n]) if (!seen.has(m)) { seen.add(m); q.push(m); } }
+    return seen;
+  }
+
+  /* Returns { V:{node:volts|null}, crCoil, mCoil, short }.
+     V === null means the node is floating (no path to either rail). */
+  function solve() {
+    const s = state, V = {};
+    const hard = hardEdges(s), soft = softEdges(s);
+    const adj = adjacency(hard);
+    if (!s.power) { NODES.forEach(n => V[n] = 0); return { V, crCoil: false, mCoil: false, short: false }; }
+
+    // A reversed diode conducts from the A1 side to the A2 side: a dead short across the coil.
+    const adjHot = s.faults.diodeRev ? adjacency(hard, [['DK','DA']]) : adj;
+    const hot = flood(['P'], adjHot);
+    if (hot.has('N')) { NODES.forEach(n => V[n] = null); return { V, crCoil: false, mCoil: false, short: true }; }
+    const zero = flood(['N'], adj);
+    NODES.forEach(n => V[n] = hot.has(n) ? 24 : zero.has(n) ? 0 : null);
+
+    // Islands that touch neither rail directly take their potential through a coil.
+    for (let pass = 0; pass < 4; pass++) {
+      let changed = false; const seen = new Set();
+      for (const n of NODES) {
+        if (V[n] !== null || seen.has(n)) continue;
+        const isl = flood([n], adj); isl.forEach(x => seen.add(x));
+        const pots = [];
+        for (const [a, b] of soft) {
+          if (isl.has(a) && !isl.has(b) && V[b] !== null) pots.push(V[b]);
+          if (isl.has(b) && !isl.has(a) && V[a] !== null) pots.push(V[a]);
+        }
+        if (pots.length) { const v = pots.reduce((x, y) => x + y, 0) / pots.length; isl.forEach(x => V[x] = v); changed = true; }
+      }
+      if (!changed) break;
+    }
+    const across = (a, b) => (V[a] === null || V[b] === null) ? 0 : V[a] - V[b];
+    return {
+      V, short: false,
+      crCoil: !s.faults.crCoilOpen && across('CRA1','CRA2') >= 18,   // pick-up threshold
+      mCoil:  !s.faults.mCoilOpen  && across('MA1','MA2')  >= 18
+    };
+  }
+
+  /* One state-machine step. Returns true if anything changed.
+     Order matters: fuse first, then CR, then M — one event per step so
+     the UI can animate the sequence. */
+  function step() {
+    const r = solve();
+    if (r.short) { state.fuseBlown = true; return true; }
+    if (r.crCoil !== state.crPicked) { state.crPicked = r.crCoil; return true; }
+    if (r.mCoil !== state.mPicked) { state.mPicked = r.mCoil; return true; }
+    return false;
+  }
+  function settle() { let i = 0; while (step() && ++i < 20); return solve(); }
+
+  /* Which wire groups carry current (drives the flow animation). */
+  function flows(r) {
+    const s = state, f = s.faults, tot = r.crCoil || r.mCoil;
+    return {
+      tot,
+      start: tot && (s.startPressed || f.startStuck),
+      seal:  tot && s.crPicked && !f.sealOpen,
+      cr: r.crCoil, m: r.mCoil
+    };
+  }
+
+  /* Resistance between two nodes (Infinity = open). Supply is treated as open. */
+  function continuity(a, b) {
+    const edges = hardEdges(state).map(e => [e[0], e[1], 0.05]).concat(softEdges(state));
+    const dist = {}; NODES.forEach(n => dist[n] = Infinity); dist[a] = 0;
+    const done = new Set();
+    for (;;) {
+      let u = null;
+      for (const n of NODES) if (!done.has(n) && dist[n] < Infinity && (u === null || dist[n] < dist[u])) u = n;
+      if (u === null) break;
+      done.add(u);
+      for (const [x, y, w] of edges) {
+        const v = x === u ? y : y === u ? x : null;
+        if (v && dist[u] + w < dist[v]) dist[v] = dist[u] + w;
+      }
+    }
+    return dist[b];
+  }
+
+  return { state, NODES, solve, step, settle, flows, continuity };
+})();
+/*</SIM-CORE>*/
+
+if (typeof document !== 'undefined') (function () {
+const S_ = Sim.state;
+const $ = id => document.getElementById(id);
+const RELAY_MS = 55;     // armature travel time (visible sequencing CR → M)
+const MIN_HOLD = 220;    // a quick click still holds the button long enough to seal in
+
+/* =====================================================================
+   2. SCHEMATIC — drawn from data tables so geometry lives in one place.
+   Wire paths are drawn in the direction of conventional current
+   (24 V+ → 24 V−) so the flow animation runs the right way.
+   ===================================================================== */
+// [id, path, electrical node (colour), flow group]
+const WIRES = [
+  ['psu_p',     'M70,350 V60 H300',      'P',    'tot'],
+  ['rail_p',    'M300,60 H720',          'P',    null],
+  ['f_in',      'M300,60 V85',           'P',    'tot'],
+  ['f_ol',      'M300,125 V150',         'F1b',  'tot'],
+  ['ol_stop_a', 'M300,200 V217.5',       'OL96', 'tot'],
+  ['ol_stop_b', 'M300,217.5 V235',       'ST11', 'tot'],
+  ['stop_j2',   'M300,285 V315',         'J2',   'tot'],
+  ['j2_start',  'M300,315 V340',         'J2',   'start'],
+  ['start_j3',  'M300,390 V420',         'J3',   'start'],
+  ['j2_seal',   'M300,315 H460 V340',    'J2',   'seal'],
+  ['seal_j3',   'M460,390 V420 H300',    'J3',   'seal'],
+  ['j3_tap',    'M300,420 V450',         'J3',   'tot'],
+  ['j3_a1',     'M300,450 V580',         'J3',   'cr'],
+  ['a2_j',      'M300,630 V665',         'CRA2', 'cr'],
+  ['n_a',       'M300,665 V692.5',       'CRA2', 'cr'],
+  ['n_b',       'M300,692.5 V720',       'N',    'cr'],
+  ['dk',        'M300,545 H180 V585',    'J3',   null],
+  ['da',        'M180,625 V665 H300',    'CRA2', null],
+  ['m_tap',     'M300,450 H640 V480',    'J3',   'm'],
+  ['m_a1',      'M640,530 V580',         'CR24', 'm'],
+  ['m_n',       'M640,630 V720',         'N',    'm'],
+  ['n_m',       'M640,720 H300',         'N',    'm'],
+  ['n_tot',     'M300,720 H70 V450',     'N',    'tot'],
+  ['rail_n',    'M640,720 H720',         'N',    null]
+];
+const JUNCTIONS = [[300,60],[300,315],[300,420],[300,450],[300,545],[300,665],[300,720],[640,720]];
+// Contacts: (x,y) is the top terminal; bottom terminal is 50 px lower.
+const CONTACTS = [
+  { id:'ol',    x:300, y:150, top:'OL95', bot:'OL96', nc:true,  flow:'tot',   nums:['95','96'], name:'OL' },
+  { id:'stop',  x:300, y:235, top:'ST11', bot:'ST12', nc:true,  flow:'tot',   nums:['11','12'], name:'STOP' },
+  { id:'start', x:300, y:340, top:'PB13', bot:'PB14', nc:false, flow:'start', nums:['13','14'], name:'START' },
+  { id:'seal',  x:460, y:340, top:'CR13', bot:'CR14', nc:false, flow:'seal',  nums:['13','14'], name:'CR' },
+  { id:'c23',   x:640, y:480, top:'CR23', bot:'CR24', nc:false, flow:'m',     nums:['23','24'], name:'CR' }
+];
+const TIPS = {
+  ol:    'Overload relay (OL) — NC contact 95/96. Protects the motor from sustained over-current: it opens on a trip and drops out CR. Click to reset.',
+  stop:  'STOP pushbutton — NC contact 11/12, in series with everything. A press, a loose wire or a broken button all stop the motor (fail-safe). Hold to press.',
+  start: 'START pushbutton — NO contact 13/14. Momentary: it only has to stay closed long enough for CR to seal itself in. Hold to press.',
+  seal:  'CR auxiliary NO 13/14 — the seal-in (holding) contact. Wired in parallel with START so CR keeps itself energized after you let go.',
+  c23:   'CR auxiliary NO 23/24 — second pole of the relay. Passes 24 V on to the M contactor coil.',
+  cr:    'CR control relay coil, A1 (+) / A2 (−). When energized it closes 13/14 (seal-in) and 23/24 (feeds M).',
+  m:     'M motor contactor coil, A1 / A2. Its main power contacts connect the motor to the line.',
+  diode: 'Flyback diode across the CR coil — cathode (K) on A1, anode (A) on A2. Reverse-biased while running; at turn-off it gives the collapsing field a path so the spike does not arc the contacts.',
+  fuse:  'F1 control fuse — protects the 24 V control wiring. Click to replace when blown.',
+  psu:   '24 VDC power supply. Click to switch on / off.',
+  motor: 'Motor — runs while the M contactor is pulled in.'
+};
+
+const NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const svg = $('svg');
+const colorables = [];   // {el, node}  – coloured by node voltage
+const flowEls = [];      // {el, key}   – animated when that flow group carries current
+const TERMS = {};        // clickable meter points: id → {node, x, y, name, lab}
+const ui = {};           // handles to elements render() needs
+const L = {};            // layers
+
+function addWire(id, d, node, flowKey) {
+  const w = svgEl('path', { d, id: 'w_' + id, class: 'wire' }, L.wires);
+  colorables.push({ el: w, node });
+  if (flowKey) flowEls.push({ el: svgEl('path', { d, class: 'flow' }, L.flow), key: flowKey });
+}
+function addTerm(id, node, x, y, label, name, side) {
+  const g = svgEl('g', { class: 'term', 'data-term': id, 'data-tip': name + ' — click to place a meter lead' }, L.terms);
+  svgEl('circle', { cx: x, cy: y, r: 11, fill: 'transparent' }, g);
+  svgEl('circle', { cx: x, cy: y, r: 4.5, class: 'pin' }, g);
+  let lab = null;
+  if (label) lab = svgEl('text', { x: side === 'L' ? x - 10 : x + 10, y: y + 4, class: 'tlabel', 'text-anchor': side === 'L' ? 'end' : 'start' }, L.terms, label);
+  TERMS[id] = { node, x, y, name, lab };
+}
+function addMark(key, x, y) {
+  const g = svgEl('g', { class: 'mark' }, L.marks);
+  svgEl('circle', { cx: x, cy: y, r: 8 }, g);
+  svgEl('path', { d: `M${x-4},${y-4} L${x+4},${y+4} M${x+4},${y-4} L${x-4},${y+4}` }, g);
+  ui.marks[key] = g;
+}
+
+function buildSchematic() {
+  ['wires','comp','flow','terms','marks','probes'].forEach(k => L[k] = svgEl('g', {}, svg));
+  ui.blades = {}; ui.acts = {}; ui.marks = {};
+
+  WIRES.forEach(w => addWire(...w));
+  JUNCTIONS.forEach(([x, y]) => svgEl('circle', { cx: x, cy: y, r: 4, class: 'dot' }, L.wires));
+
+  // rail captions + rail test points
+  svgEl('text', { x: 110, y: 50, class: 'lbl', fill: '#29a9ff' }, L.comp, '24 V+');
+  svgEl('text', { x: 110, y: 742, class: 'lbl' }, L.comp, '24 V−  (common)');
+  addTerm('TPP', 'P', 720, 60, 'L+', '24 V+ rail', 'R');
+  addTerm('TPN', 'N', 720, 720, 'L−', '24 V− rail', 'R');
+
+  // power supply
+  const psu = svgEl('g', { id: 'c_psu', 'data-tip': TIPS.psu }, L.comp);
+  svgEl('rect', { x: 38, y: 350, width: 64, height: 100, rx: 8, class: 'psu' }, psu);
+  svgEl('text', { x: 70, y: 392, class: 'lbl', 'text-anchor': 'middle', 'pointer-events': 'none' }, psu, '24 VDC');
+  svgEl('text', { x: 70, y: 408, class: 'sub', 'text-anchor': 'middle', 'pointer-events': 'none' }, psu, 'supply');
+  svgEl('text', { x: 82, y: 366, class: 'sub' }, psu, '+');
+  svgEl('text', { x: 82, y: 444, class: 'sub' }, psu, '−');
+  ui.psuLed = svgEl('circle', { cx: 54, cy: 430, r: 4, fill: '#2a323d' }, psu);
+  psu.addEventListener('click', () => { S_.power = !S_.power; log(S_.power ? '24 V supply ON.' : '24 V supply OFF.'); update(); });
+
+  // fuse F1
+  const fz = svgEl('g', { id: 'c_fuse', class: 'fuse', 'data-tip': TIPS.fuse }, L.comp);
+  svgEl('rect', { x: 291, y: 91, width: 18, height: 28, rx: 3, class: 'fusebody' }, fz);
+  const link = svgEl('path', { d: 'M300,85 V125', class: 'sym link' }, fz);
+  colorables.push({ el: link, node: 'F1a' });
+  svgEl('text', { x: 300, y: 110, class: 'burn' }, fz, '✕');
+  svgEl('text', { x: 278, y: 104, class: 'lbl', 'text-anchor': 'end' }, fz, 'F1');
+  svgEl('text', { x: 278, y: 118, class: 'sub', 'text-anchor': 'end' }, fz, '2 A');
+  svgEl('rect', { x: 262, y: 92, width: 60, height: 26, class: 'hit' }, fz);
+  fz.addEventListener('click', replaceFuse);
+  flowEls.push({ el: svgEl('path', { d: 'M300,85 V125', class: 'flow' }, L.flow), key: 'tot' });
+  ui.fuse = fz;
+  addTerm('F1a', 'F1a', 300, 85, null, 'F1 line side');
+  addTerm('F1b', 'F1b', 300, 125, null, 'F1 load side');
+
+  // contacts
+  CONTACTS.forEach(c => {
+    const { x, y } = c;
+    const g = svgEl('g', { id: 'c_' + c.id, 'data-tip': TIPS[c.id] }, L.comp);
+    const topStub = svgEl('path', { d: `M${x},${y} V${y+12}` + (c.nc ? ` H${x+9}` : ''), class: 'sym' }, g);
+    const botStub = svgEl('path', { d: `M${x},${y+50} V${y+38}`, class: 'sym' }, g);
+    const blade = svgEl('path', { d: `M${x},${y+38} V${y+10}`, class: 'sym blade', style: `transform-origin:${x}px ${y+38}px` }, g);
+    colorables.push({ el: topStub, node: c.top }, { el: botStub, node: c.bot }, { el: blade, node: c.bot });
+    ui.blades[c.id] = blade;
+    flowEls.push({ el: svgEl('path', { d: `M${x},${y} V${y+50}`, class: 'flow' }, L.flow), key: c.flow });
+    addTerm(c.top, c.top, x, y, c.nums[0], `${c.name} ${c.nums[0]}`);
+    addTerm(c.bot, c.bot, x, y + 50, c.nums[1], `${c.name} ${c.nums[1]}`);
+
+    if (c.id === 'stop' || c.id === 'start') {              // pushbutton actuator
+      const a = svgEl('g', { class: 'act' }, g);
+      svgEl('path', { d: `M${x-8},${y+25} H${x-30}`, class: 'mech' }, a);
+      svgEl('rect', { x: x - 42, y: y + 15, width: 12, height: 20, rx: 3, fill: c.id === 'stop' ? '#ff4d4f' : '#2fd67b' }, a);
+      ui.acts[c.id] = a;
+      svgEl('text', { x: x - 52, y: y + 24, class: 'lbl', 'text-anchor': 'end' }, g, c.name);
+      svgEl('text', { x: x - 52, y: y + 38, class: 'sub', 'text-anchor': 'end' }, g, c.nc ? 'NC pushbutton' : 'NO pushbutton');
+      const hit = svgEl('rect', { x: x - 110, y: y + 9, width: 130, height: 32, class: 'hit' }, g);
+      bindMomentary(hit, c.id === 'stop' ? 'stopPressed' : 'startPressed');
+    } else if (c.id === 'ol') {                             // thermal element symbol
+      svgEl('path', { d: `M${x-8},${y+25} H${x-28}`, class: 'mech' }, g);
+      svgEl('path', { d: `M${x-28},${y+16} v18 h-10 v-18`, class: 'mech', style: 'stroke-dasharray:none' }, g);
+      svgEl('text', { x: x - 52, y: y + 24, class: 'lbl', 'text-anchor': 'end' }, g, 'OL');
+      svgEl('text', { x: x - 52, y: y + 38, class: 'sub', 'text-anchor': 'end' }, g, 'overload NC');
+      const hit = svgEl('rect', { x: x - 110, y: y + 9, width: 130, height: 32, class: 'hit' }, g);
+      hit.addEventListener('click', resetOL);
+    } else {
+      svgEl('text', { x: x + 42, y: y + 24, class: 'lbl' }, g, 'CR');
+      svgEl('text', { x: x + 42, y: y + 38, class: 'sub' }, g, c.id === 'seal' ? 'seal-in NO' : 'aux NO → M');
+    }
+  });
+
+  // coils
+  [['cr', 300, 'CR', 'CRA1', 'CRA2'], ['m', 640, 'M', 'MA1', 'MA2']].forEach(([id, x, txt, a1, a2]) => {
+    const g = svgEl('g', { id: 'c_' + id, 'data-tip': TIPS[id] }, L.comp);
+    ui[id + 'Coil'] = svgEl('rect', { x: x - 32, y: 580, width: 64, height: 50, rx: 7, class: 'coil' }, g);
+    svgEl('text', { x, y: 611, class: 'coiltxt' }, g, txt);
+    svgEl('text', { x: x + 42, y: 598, class: 'sub' }, g, id === 'cr' ? 'control relay' : 'contactor');
+    addTerm(a1, a1, x, 580, null, `${txt} A1`); addTerm(a2, a2, x, 630, null, `${txt} A2`);
+    svgEl('text', { x: x + 10, y: 573, class: 'tlabel' }, L.terms, 'A1');
+    svgEl('text', { x: x + 10, y: 647, class: 'tlabel' }, L.terms, 'A2');
+  });
+
+  // flyback diode (cathode up = towards A1)
+  const dg = svgEl('g', { id: 'c_diode', 'data-tip': TIPS.diode }, L.comp);
+  const ds = svgEl('g', { class: 'dsym' }, dg);
+  const d1 = svgEl('path', { d: 'M180,585 V595', class: 'sym' }, ds), d2 = svgEl('path', { d: 'M180,615 V625', class: 'sym' }, ds);
+  svgEl('path', { d: 'M168,615 H192 L180,596 Z', class: 'dtri' }, ds);
+  svgEl('path', { d: 'M167,595 H193', class: 'sym', style: 'stroke:#8a97a8' }, ds);
+  svgEl('rect', { x: 160, y: 588, width: 40, height: 34, class: 'hit', style: 'cursor:default' }, dg);
+  svgEl('text', { x: 148, y: 603, class: 'lbl', 'text-anchor': 'end' }, dg, 'D1');
+  svgEl('text', { x: 148, y: 617, class: 'sub', 'text-anchor': 'end' }, dg, 'flyback');
+  colorables.push({ el: d1, node: 'DK' }, { el: d2, node: 'DA' });
+  ui.diode = ds;
+  addTerm('DK', 'DK', 180, 585, 'K', 'D1 lead on A1 side', 'L');
+  addTerm('DA', 'DA', 180, 625, 'A', 'D1 lead on A2 side', 'L');
+
+  // motor (driven by M's main contacts — shown as a mechanical link)
+  const mg = svgEl('g', { 'data-tip': TIPS.motor }, L.comp);
+  svgEl('path', { d: 'M672,605 H756', class: 'mech' }, mg);
+  svgEl('text', { x: 714, y: 622, class: 'sub', 'text-anchor': 'middle' }, mg, 'main contacts');
+  ui.motor = svgEl('circle', { cx: 790, cy: 605, r: 34, class: 'motor' }, mg);
+  ui.rotor = svgEl('g', { class: 'rotor' }, mg);
+  [0, 60, 120].forEach(a => {
+    const r = a * Math.PI / 180, dx = 22 * Math.cos(r), dy = 22 * Math.sin(r);
+    svgEl('line', { x1: 790 - dx, y1: 605 - dy, x2: 790 + dx, y2: 605 + dy }, ui.rotor);
+  });
+  ui.motorTxt = svgEl('text', { x: 790, y: 658, class: 'sub', 'text-anchor': 'middle' }, mg, 'MOTOR — stopped');
+
+  // fault markers (red ✕) — shown only when a fault is injected AND not hidden by mystery mode
+  Object.keys(FAULTS).forEach(k => addMark(k, ...FAULTS[k].mark));
+
+  // meter probes
+  ui.probeRed = svgEl('circle', { r: 9, class: 'probe red' }, L.probes);
+  ui.probeBlack = svgEl('circle', { r: 13, class: 'probe black' }, L.probes);
+
+  L.terms.addEventListener('click', e => {
+    const t = e.target.closest('[data-term]'); if (t) placeLead(t.dataset.term);
+  });
+}
+
+/* =====================================================================
+   3. CONTENT TABLES — edit these to extend the trainer.
+   ===================================================================== */
+
+/* Faults shown as toggles. Keys must exist in Sim.state.faults.
+     label  toggle text          comp  SVG element id highlighted in the quiz
+     mark   [x,y] of the red ✕   sym   one-line "what you would see" (used as quiz feedback) */
+const FAULTS = {
+  stopWire:   { label: 'Break STOP wire (96 → 11)',  comp: 'w_ol_stop_b', mark: [300, 217.5],
+                sym: 'An open wire ahead of STOP leaves the whole rung dead — START does nothing at all.' },
+  sealOpen:   { label: 'Seal-in contact stuck open',  comp: 'c_seal',      mark: [432, 365],
+                sym: 'With no seal-in, CR only stays in while START is physically held.' },
+  diodeRev:   { label: 'Reverse diode',               comp: 'c_diode',     mark: [208, 605],
+                sym: 'A reversed diode is a dead short across the coil — F1 blows the instant 24 V reaches A1.' },
+  diodeOpen:  { label: 'Diode open / missing',        comp: 'c_diode',     mark: [208, 605],
+                sym: 'The circuit still works, but every turn-off produces an unclamped inductive spike.' },
+  crCoilOpen: { label: 'CR coil open',                comp: 'c_cr',        mark: [256, 605],
+                sym: 'An open coil shows a full 24 V across A1–A2 but never pulls in.' },
+  neutralOpen:{ label: 'Break CR A2 neutral',         comp: 'w_n_a',       mark: [300, 692.5],
+                sym: 'A lost neutral puts 24 V on BOTH A1 and A2 — zero volts across the coil.' },
+  c2324Open:  { label: 'CR 23/24 stuck open',         comp: 'c_c23',       mark: [614, 505],
+                sym: 'CR seals in normally but nothing reaches M A1.' },
+  mCoilOpen:  { label: 'M coil open',                 comp: 'c_m',         mark: [596, 605],
+                sym: '24 V arrives at M A1 but the contactor never pulls in.' },
+  stopWelded: { label: 'STOP contact welded',         comp: 'c_stop',      mark: [332, 260],
+                sym: 'A welded STOP contact never opens — the motor cannot be stopped from the button.' },
+  startStuck: { label: 'START contact stuck closed',  comp: 'c_start',     mark: [332, 365],
+                sym: 'A stuck START re-energizes CR whenever the series string closes — automatic restart.' }
+};
+/* Quiz answers that are conditions rather than injectable faults. */
+const ANSWERS = Object.assign({
+  olTrip: { label: 'Overload relay tripped (95/96 open)', comp: 'c_ol',
+            sym: 'A tripped OL gives 24 V on 95 and nothing on 96.' },
+  fuse:   { label: 'F1 blown',                            comp: 'c_fuse',
+            sym: 'A blown F1 gives 24 V on its line side and 0 V on everything after it.' }
+}, FAULTS);
+
+/* WHAT-IF SCENARIOS
+   To add one, append an object:
+     title    the symptom as an operator would report it
+     clue     the meter readings / observations you want the tech to reason from
+     options  3–4 keys from ANSWERS (shown as the multiple-choice buttons)
+     answer   the correct key
+     why      explanation shown when they get it right
+   "Load into simulator" injects `answer` so they can prove it with the meter. */
+const SCENARIOS = [
+  { title: 'Runs, but dies when you let go of START',
+    clue: 'CR and M pull in while START is held. The moment the button is released both drop out.',
+    options: ['sealOpen', 'stopWire', 'crCoilOpen', 'c2324Open'], answer: 'sealOpen',
+    why: 'START is only a momentary path. CR 13/14 is supposed to close in parallel with it and take over. If that contact (or its wiring) is open, nothing holds the rung once you release START. Check: with CR pulled in, you should read 24 V on CR 14.' },
+  { title: 'Completely dead — START does nothing',
+    clue: 'Supply is on, F1 is good. You read 24 V on OL 95 and OL 96, but 0 V on STOP 11.',
+    options: ['olTrip', 'stopWire', 'stopWelded', 'fuse'], answer: 'stopWire',
+    why: 'Voltage is present on 96 and gone at the very next terminal, 11. Nothing but a wire sits between them, so that wire (or a termination) is open. The fault is always between the last good reading and the first bad one.' },
+  { title: 'Completely dead — 24 V on 95, 0 V on 96',
+    clue: 'Supply on, F1 good. Motor was running hot before it quit.',
+    options: ['olTrip', 'stopWire', 'neutralOpen', 'mCoilOpen'], answer: 'olTrip',
+    why: 'Voltage goes in on 95 and does not come out on 96, so the NC overload contact is open: the relay has tripped. Find out why the motor overloaded, let it cool, then reset.' },
+  { title: 'F1 blows the instant START is pressed',
+    clue: 'New fuse holds until START is pushed, then pops immediately. The relay was recently replaced.',
+    options: ['diodeRev', 'crCoilOpen', 'startStuck', 'sealOpen'], answer: 'diodeRev',
+    why: 'The fuse survives until 24 V reaches A1, so the short is on the load side of START. A flyback diode fitted backwards (anode on A1) is forward-biased across the supply — a dead short. Cathode (the band) always goes to A1 (+).' },
+  { title: 'Relay will not pull in — 24 V on A1 AND on A2',
+    clue: 'While holding START you read 24 V on CR A1 and 24 V on CR A2 (black lead on the 24 V− rail).',
+    options: ['crCoilOpen', 'neutralOpen', 'diodeRev', 'sealOpen'], answer: 'neutralOpen',
+    why: 'A coil needs a difference in potential. 24 V on both terminals means 0 V across the coil: the supply is reading through the coil to a return wire that goes nowhere. The open is between A2 and the 24 V− rail.' },
+  { title: 'Relay will not pull in — 24 V on A1, 0 V on A2',
+    clue: 'While holding START you read a solid 24 V across A1–A2, but CR never picks up.',
+    options: ['crCoilOpen', 'neutralOpen', 'stopWire', 'c2324Open'], answer: 'crCoilOpen',
+    why: 'Full voltage is across the coil and it still does not operate, so the coil itself is open. Confirm with power off: A1–A2 should read coil resistance, not OL.' },
+  { title: 'CR seals in, but the motor never starts — 0 V on M A1',
+    clue: 'CR pulls in and holds. You read 24 V on CR 23 and 0 V on CR 24 / M A1.',
+    options: ['mCoilOpen', 'c2324Open', 'sealOpen', 'neutralOpen'], answer: 'c2324Open',
+    why: 'CR is in, so 23/24 should be closed. 24 V on one side and 0 V on the other means the contact is not making — burnt, dirty or mechanically stuck.' },
+  { title: 'CR seals in, but the motor never starts — 24 V on M A1',
+    clue: 'CR pulls in and holds. You read 24 V on M A1 and 0 V on M A2.',
+    options: ['mCoilOpen', 'c2324Open', 'diodeOpen', 'stopWelded'], answer: 'mCoilOpen',
+    why: 'The contactor has full voltage across its coil and does not move: open coil. Same reasoning as the CR coil — voltage present, no action, suspect the load.' },
+  { title: 'Motor will not stop from the STOP button',
+    clue: 'Pressing STOP has no effect. Tripping the overload does stop it.',
+    options: ['stopWelded', 'startStuck', 'sealOpen', 'c2324Open'], answer: 'stopWelded',
+    why: 'The OL still breaks the rung but STOP does not, so the STOP contact is not opening — welded, or jumpered out. With STOP held you would still read 24 V on terminal 12.' },
+  { title: 'Motor restarts by itself when the OL is reset',
+    clue: 'STOP works only while it is held. Release it and the motor is off and running again.',
+    options: ['startStuck', 'stopWelded', 'sealOpen', 'diodeRev'], answer: 'startStuck',
+    why: 'Three-wire control is supposed to give low-voltage (no-restart) protection. If START is stuck closed the circuit behaves like two-wire control and restarts whenever the series string is made. Read across START 13–14: 0 V with the button released means it is closed.' }
+];
+const MYSTERY_POOL = ['stopWire', 'sealOpen', 'diodeRev', 'crCoilOpen', 'neutralOpen', 'c2324Open', 'mCoilOpen', 'stopWelded', 'startStuck'];
+
+/* FINGER TRACE — each step highlights `hl` (ids of wires "w_…" or components "c_…"). */
+const TRACE_STEPS = [
+  { t: 'Start on the 24 V+ rail', hl: ['w_psu_p', 'w_rail_p', 'w_f_in', 'c_fuse', 'w_f_ol'],
+    b: 'Put your finger on the top rail. Control power leaves the supply, runs along the 24 V+ rail and drops through fuse F1 into the rung. Everything from here to the first open contact sits at 24 V.',
+    try: 'Probe either side of F1 — both should read 24 V.' },
+  { t: 'Overload contact 95 → 96 (NC)', hl: ['c_ol'],
+    b: 'First device in the string. It is normally closed, so a healthy overload relay passes 24 V straight through. If the motor draws too much current for too long the relay trips and this contact opens.',
+    try: 'Press Trip OL and compare the readings on 95 and 96.' },
+  { t: 'STOP pushbutton 11 → 12 (NC)', hl: ['w_ol_stop_a', 'w_ol_stop_b', 'c_stop', 'w_stop_j2'],
+    b: 'STOP is also normally closed and in series. That is deliberate: pressing it, a broken wire and a loose terminal all have the same effect — the motor stops. A stop circuit must fail safe.',
+    try: 'At rest you should already read 24 V on terminal 12.' },
+  { t: 'START pushbutton 13 → 14 (NO)', hl: ['w_j2_start', 'c_start', 'w_start_j3'],
+    b: 'This is where 24 V waits. START is normally open, so 13 is live and 14 is dead. Measure across 13–14 and you read the full 24 V — an open switch has the supply across it.',
+    try: 'Hold START: 14 jumps to 24 V and the reading across the contact falls to 0 V.' },
+  { t: 'CR coil A1 → A2, home to 24 V−', hl: ['w_j3_tap', 'w_j3_a1', 'c_cr', 'w_a2_j', 'w_n_a', 'w_n_b', 'w_n_tot'],
+    b: 'With START closed, 24 V reaches A1. A2 is tied to the 24 V− rail, so the coil has 24 V across it and pulls in. The coil is the only load in the rung: all the voltage is dropped here.',
+    try: 'While running: A1 = 24 V, A2 = 0 V.' },
+  { t: 'Seal-in: CR 13 → 14 around START', hl: ['w_j2_seal', 'c_seal', 'w_seal_j3'],
+    b: 'When CR pulls in, its own auxiliary contact 13/14 closes in parallel with START. Now there are two paths to the coil, so you can let go of the button and the relay holds itself in. This is the "third wire" of three-wire control.',
+    try: 'Tap START and watch the current move to the seal-in branch when you release.' },
+  { t: 'Second pole: CR 23 → 24 picks up M', hl: ['w_m_tap', 'c_c23', 'w_m_a1', 'c_m', 'w_m_n', 'w_n_m'],
+    b: 'The relay\'s second NO contact, 23/24, feeds the M contactor coil from the same point as CR A1. CR in → 23/24 closed → M A1 at 24 V → contactor pulls in → motor runs.',
+    try: 'Inject "CR 23/24 stuck open" and see what still works.' },
+  { t: 'Flyback diode across the coil', hl: ['w_dk', 'c_diode', 'w_da'],
+    b: 'A coil is an inductor; when its current is cut it generates a large reverse voltage. The diode — cathode (K) on A1, anode (A) on A2 — is reverse-biased while running and conducts only at turn-off, letting the energy circulate harmlessly. Fit it backwards and it shorts the supply.',
+    try: 'Inject "Reverse diode", replace F1, then press START.' },
+  { t: 'Stopping, tripping and no-restart', hl: ['c_ol', 'c_stop', 'c_seal'],
+    b: 'Open anything in the series string — STOP, the overload, the fuse, the supply — and CR drops out. Its seal-in contact opens with it, so when the string closes again the circuit stays off until someone presses START. That is low-voltage protection.',
+    try: 'Run the motor, switch the 24 V supply off and on again. It must stay stopped.' }
+];
+
+/* BLINDFOLD TERMINAL MAP rows. `ans` is checked in order, case-insensitive. */
+const TERMMAP = [
+  { dev: 'Overload relay — trip contact',       type: 'NC',   ans: ['95', '96'], note: 'Opens on trip. Used in this circuit.' },
+  { dev: 'Overload relay — alarm contact',      type: 'NO',   ans: ['97', '98'], note: 'Closes on trip (pilot light / PLC input). Not wired here.' },
+  { dev: 'STOP pushbutton',                     type: 'NC',   ans: ['11', '12'], note: 'A single NC block is often marked just 1–2.' },
+  { dev: 'START pushbutton',                    type: 'NO',   ans: ['13', '14'], note: 'A single NO block is often marked just 3–4.' },
+  { dev: 'CR aux, 1st pole — seal-in',          type: 'NO',   ans: ['13', '14'], note: 'Parallels START.' },
+  { dev: 'CR aux, 2nd pole — feeds M',          type: 'NO',   ans: ['23', '24'], note: 'First digit = pole number.' },
+  { dev: 'CR coil  (+ / −)',                    type: 'COIL', ans: ['A1', 'A2'], note: 'A1 positive, A2 to common.' },
+  { dev: 'M contactor coil  (+ / −)',           type: 'COIL', ans: ['A1', 'A2'], note: '' },
+  { dev: 'Flyback diode lead on A1 / on A2',    type: 'D',    ans: ['K', 'A'],   note: 'Cathode (banded end) to the positive side.' },
+  { dev: 'NEMA 3-wire station wire numbers',    type: 'NEMA', ans: ['1', '2', '3'], note: 'STOP between 1–2, START between 2–3, seal-in across 2–3.' }
+];
+
+/* =====================================================================
+   4. UI
+   ===================================================================== */
+let mystery = null;           // key of the hidden fault while a mystery challenge is running
+let lastR = null, relayTimer = null;
+const logLines = [];
+const meter = { mode: 'V', red: null, black: 'TPN', next: 'red' };
+
+function log(msg) { logLines.unshift(msg); logLines.length = Math.min(logLines.length, 2); }
+
+/* Re-solve, redraw, and schedule the next relay movement if a coil and
+   its armature disagree. This loop IS the state machine's clock. */
+function update() {
+  let r = Sim.solve();
+  if (r.short) {
+    S_.fuseBlown = true;
+    log(mystery ? 'F1 has blown.' : 'F1 blown — the reversed diode is a dead short across the coil.');
+    r = Sim.solve();
+  }
+  render(r);
+  clearTimeout(relayTimer);
+  if (r.crCoil !== S_.crPicked || r.mCoil !== S_.mPicked) {
+    relayTimer = setTimeout(() => {
+      const was = { cr: S_.crPicked, m: S_.mPicked };
+      Sim.step();
+      if (!was.cr && S_.crPicked) log('CR pulls in — 13/14 and 23/24 close.');
+      if (was.cr && !S_.crPicked) log(S_.faults.diodeOpen && !mystery
+        ? 'CR drops out — no flyback path: several hundred volts of inductive kick across the opening contact.'
+        : 'CR drops out — coil energy circulates through D1 (clamped to about −0.7 V).');
+      if (!was.m && S_.mPicked) log('M contactor pulls in — motor running.');
+      if (was.m && !S_.mPicked) log('M contactor drops out — motor stopped.');
+      update();
+    }, RELAY_MS);
+  }
+}
+
+function render(r) {
+  lastR = r;
+  const f = S_.faults, blind = !!mystery;
+
+  // wire colours by node voltage (suppressed in mystery mode: use the meter)
+  for (const c of colorables) {
+    const v = r.V[c.node];
+    c.el.classList.remove('v24', 'v0', 'vf', 'vx');
+    c.el.classList.add(blind ? 'vx' : v === null ? 'vf' : v >= 12 ? 'v24' : 'v0');
+  }
+  const fl = blind ? {} : Sim.flows(r);
+  flowEls.forEach(o => o.el.classList.toggle('on', !!fl[o.key]));
+
+  // contact blades. In mystery mode they show the *intended* position so the drawing does not give the fault away.
+  const closed = {
+    ol: !S_.olTripped,
+    stop: blind ? !S_.stopPressed : (!S_.stopPressed || f.stopWelded),
+    start: blind ? S_.startPressed : (S_.startPressed || f.startStuck),
+    seal: S_.crPicked && (blind || !f.sealOpen),
+    c23: S_.crPicked && (blind || !f.c2324Open)
+  };
+  for (const k in closed) ui.blades[k].classList.toggle('open', !closed[k]);
+  ui.acts.stop.classList.toggle('pressed', S_.stopPressed);
+  ui.acts.start.classList.toggle('pressed', S_.startPressed);
+
+  ui.crCoil.classList.toggle('on', S_.crPicked || (!blind && r.crCoil));
+  ui.mCoil.classList.toggle('on', S_.mPicked || (!blind && r.mCoil));
+  ui.motor.classList.toggle('run', S_.mPicked);
+  ui.rotor.classList.toggle('run', S_.mPicked);
+  ui.motorTxt.textContent = S_.mPicked ? 'MOTOR — running' : 'MOTOR — stopped';
+  ui.fuse.classList.toggle('blown', S_.fuseBlown);
+  ui.psuLed.setAttribute('fill', S_.power ? '#2fd67b' : '#2a323d');
+  ui.diode.classList.toggle('rev', f.diodeRev && !blind);
+  ui.diode.classList.toggle('gone', f.diodeOpen && !blind);
+  TERMS.DK.lab.textContent = f.diodeRev && !blind ? 'A' : 'K';
+  TERMS.DA.lab.textContent = f.diodeRev && !blind ? 'K' : 'A';
+  for (const k in ui.marks) ui.marks[k].classList.toggle('on', f[k] && !blind);
+
+  // header LEDs
+  $('led_pwr').className = 'led' + (S_.power ? ' b' : '');
+  $('led_f1').className = 'led ' + (S_.fuseBlown ? 'r' : 'g');
+  $('led_ol').className = 'led ' + (S_.olTripped ? 'r' : 'g');
+  $('led_cr').className = 'led' + (S_.crPicked ? ' r' : '');
+  $('led_m').className = 'led' + (S_.mPicked ? ' g' : '');
+
+  // control panel
+  $('swPower').checked = S_.power;
+  $('btnStart').classList.toggle('down', S_.startPressed);
+  $('btnStop').classList.toggle('down', S_.stopPressed);
+  $('btnReset').classList.toggle('attn', S_.olTripped);
+  $('btnFuse').classList.toggle('attn', S_.fuseBlown);
+  document.querySelectorAll('#faults input').forEach(i => {
+    i.checked = !blind && f[i.dataset.f]; i.disabled = blind;
+    i.parentNode.classList.toggle('on', i.checked);
+  });
+  $('btnClear').disabled = blind;
+
+  // status line
+  let st;
+  if (blind) st = `Mystery fault active — wire colours are off, use the meter.  CR ${S_.crPicked ? 'IN' : 'out'} · motor ${S_.mPicked ? 'RUNNING' : 'stopped'} · F1 ${S_.fuseBlown ? 'BLOWN' : 'ok'}`;
+  else if (!S_.power) st = 'Supply OFF — circuit de-energized.';
+  else if (S_.fuseBlown) st = 'F1 blown — no control power past the fuse.';
+  else if (S_.olTripped) st = 'Overload tripped — 95/96 open. Reset the OL.';
+  else if (S_.crPicked && S_.mPicked) st = fl.seal ? 'Sealed in — CR holding through 13/14, M energized, motor running.' : 'Running, but held only by the START button.';
+  else if (S_.crPicked) st = 'CR is in but M is not — look at 23/24 and the M coil.';
+  else st = 'Ready — 24 V is waiting at START 13.';
+  $('status').textContent = st;
+  $('log').innerHTML = logLines.map(l => `<div>${l}</div>`).join('');
+
+  renderMeter(r);
+}
+
+/* ---------- operator actions ---------- */
+function resetOL() {
+  if (!S_.olTripped) return;
+  S_.olTripped = false; log('Overload reset — 95/96 closed.'); update();
+}
+function tripOL() {
+  if (S_.olTripped) return;
+  S_.olTripped = true; log('Overload TRIPPED — 95/96 open.'); update();
+}
+function replaceFuse() {
+  if (!S_.fuseBlown) return;
+  S_.fuseBlown = false; log('F1 replaced.'); update();
+}
+function clearFaults() { for (const k in S_.faults) S_.faults[k] = false; }
+
+const holdT = {}, relT = {};
+function press(key) {
+  clearTimeout(relT[key]);
+  if (!S_[key]) { S_[key] = true; holdT[key] = performance.now(); update(); }
+}
+function release(key) {
+  if (!S_[key]) return;
+  const wait = Math.max(0, MIN_HOLD - (performance.now() - holdT[key]));
+  clearTimeout(relT[key]);
+  relT[key] = setTimeout(() => { S_[key] = false; update(); }, wait);
+}
+function bindMomentary(el, key) {
+  el.addEventListener('pointerdown', e => { e.preventDefault(); press(key); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => el.addEventListener(t, () => release(key)));
+  el.addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); press(key); } });
+  el.addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') release(key); });
+}
+
+function buildPanel() {
+  bindMomentary($('btnStart'), 'startPressed');
+  bindMomentary($('btnStop'), 'stopPressed');
+  $('btnReset').onclick = resetOL; $('btnTrip').onclick = tripOL; $('btnFuse').onclick = replaceFuse;
+  $('swPower').onchange = e => { S_.power = e.target.checked; log(S_.power ? '24 V supply ON.' : '24 V supply OFF.'); update(); };
+  $('faults').innerHTML = Object.keys(FAULTS).map(k =>
+    `<label data-tip="${FAULTS[k].sym}"><input type="checkbox" data-f="${k}">${FAULTS[k].label}</label>`).join('');
+  $('faults').addEventListener('change', e => {
+    const k = e.target.dataset.f; if (!k) return;
+    S_.faults[k] = e.target.checked;
+    log((e.target.checked ? 'Fault injected: ' : 'Fault cleared: ') + FAULTS[k].label + '.');
+    update();
+  });
+  $('btnClear').onclick = () => { clearFaults(); log('All faults cleared.'); update(); };
+
+  const typing = e => /INPUT|SELECT|TEXTAREA/.test(e.target.tagName);
+  document.addEventListener('keydown', e => {
+    if (typing(e) || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === 's') press('startPressed'); else if (k === 'x') press('stopPressed');
+    else if (k === 'r') resetOL(); else if (k === 'p') { S_.power = !S_.power; update(); }
+  });
+  document.addEventListener('keyup', e => {
+    const k = e.key.toLowerCase();
+    if (k === 's') release('startPressed'); else if (k === 'x') release('stopPressed');
+  });
+}
+
+/* ---------- multimeter ---------- */
+function placeLead(id) {
+  if (meter.mode === 'V') { meter[meter.next] = id; meter.next = 'red'; }
+  else { meter[meter.next] = id; meter.next = meter.next === 'red' ? 'black' : 'red'; }
+  renderMeter(lastR);
+}
+function setMode(m) {
+  meter.mode = m; meter.next = 'red';
+  if (m === 'V') { if (!meter.black) meter.black = 'TPN'; } else { meter.red = meter.black = null; }
+  renderMeter(lastR);
+}
+function renderMeter(r) {
+  const a = TERMS[meter.red], b = TERMS[meter.black];
+  const big = $('lcdBig'), unit = $('lcdUnit'), hint = $('meterHint');
+  big.classList.remove('warn');
+  $('modeV').classList.toggle('sel', meter.mode === 'V');
+  $('modeC').classList.toggle('sel', meter.mode === 'C');
+  $('moveBlack').classList.toggle('sel', meter.next === 'black');
+  $('leads').innerHTML = `<b class="r">RED</b> ${a ? a.name : '—'} &nbsp; <b class="k">BLACK</b> ${b ? b.name : '—'}`;
+  [['probeRed', a], ['probeBlack', b]].forEach(([k, t]) => {
+    ui[k].classList.toggle('on', !!t);
+    if (t) { ui[k].setAttribute('cx', t.x); ui[k].setAttribute('cy', t.y); }
+  });
+
+  if (meter.mode === 'V') {
+    unit.textContent = 'V DC';
+    if (!a) { big.textContent = '– – –'; hint.textContent = 'Click any terminal on the schematic to place the red lead.'; return; }
+    const va = r.V[a.node], vb = r.V[b.node], floating = va === null || vb === null;
+    const v = floating ? 0 : va - vb;
+    big.textContent = (v < 0 ? '−' : '') + Math.abs(v).toFixed(1);
+    if (!S_.power) hint.textContent = 'Supply is off — everything reads 0 V.';
+    else if (floating) hint.textContent = 'No reference: one lead is on a conductor that is not connected to either rail.';
+    else if (b.node === 'N') hint.textContent = v >= 12
+      ? 'Voltage is present here, so every device between this point and the 24 V+ rail is closed.'
+      : 'No voltage here. Either something upstream is open, or you are on the return side of the load. Work back toward 24 V+ until you find 24 V.';
+    else hint.textContent = Math.abs(v) >= 12
+      ? 'Full voltage across these two points: the device between them is open (or it is the load doing its job).'
+      : 'About 0 V across these points: they are at the same potential — a closed contact, or both dead.';
+  } else {
+    unit.textContent = 'Ω  continuity';
+    if (!a || !b) { big.textContent = '– – –'; hint.textContent = 'Click two terminals: first the red lead, then the black lead.'; return; }
+    if (S_.power) {
+      big.textContent = 'LIVE'; big.classList.add('warn');
+      hint.textContent = 'Never check continuity on an energized circuit. Switch the 24 V supply OFF first.';
+      return;
+    }
+    const ohms = Sim.continuity(a.node, b.node);
+    if (ohms === Infinity) { big.textContent = 'OL'; hint.textContent = 'OPEN — no path between the leads.'; }
+    else if (ohms < 5) { big.textContent = '0.2'; hint.textContent = 'CLOSED — continuity (beep).'; }
+    else { big.textContent = ohms.toFixed(0); hint.textContent = 'Reading through a coil — a healthy coil shows its winding resistance, not a short and not OL.'; }
+  }
+}
+function buildMeter() {
+  $('modeV').onclick = () => setMode('V');
+  $('modeC').onclick = () => setMode('C');
+  $('moveBlack').onclick = () => { meter.next = meter.next === 'black' ? 'red' : 'black'; renderMeter(lastR); };
+  $('blackCom').onclick = () => { meter.black = 'TPN'; meter.next = 'red'; renderMeter(lastR); };
+}
+
+/* ---------- highlight helpers ---------- */
+function highlight(cls, ids) {
+  svg.querySelectorAll('.' + cls).forEach(e => e.classList.remove(cls));
+  (ids || []).forEach(id => { const e = $(id); if (e) e.classList.add(cls); });
+}
+
+/* ---------- tab: finger trace ---------- */
+let traceIdx = 0;
+function renderTrace() {
+  $('pane_trace').innerHTML =
+    `<div class="nav"><button class="btn" id="trPrev">◀ Prev</button><button class="btn primary" id="trNext">Next ▶</button>
+       <span class="sp">step ${traceIdx + 1} / ${TRACE_STEPS.length}</span></div>
+     <ol class="steps">${TRACE_STEPS.map((s, i) =>
+       `<li data-i="${i}" class="${i === traceIdx ? 'sel' : ''}"><b>${s.t}</b><p>${s.b}</p><p class="try">Try it: ${s.try}</p></li>`).join('')}</ol>`;
+  $('trPrev').onclick = () => { traceIdx = (traceIdx + TRACE_STEPS.length - 1) % TRACE_STEPS.length; renderTrace(); };
+  $('trNext').onclick = () => { traceIdx = (traceIdx + 1) % TRACE_STEPS.length; renderTrace(); };
+  $('pane_trace').querySelectorAll('li').forEach(li => li.onclick = () => { traceIdx = +li.dataset.i; renderTrace(); });
+  highlight('trace', TRACE_STEPS[traceIdx].hl);
+}
+
+/* ---------- tab: what-if ---------- */
+const quiz = { open: -1, picked: {}, solved: new Set(), msg: '' };
+function loadCondition(key) {          // put the simulator into the state described by an ANSWERS key
+  endMystery(); clearFaults();
+  S_.olTripped = false; S_.fuseBlown = false; S_.power = true;
+  if (key === 'olTrip') S_.olTripped = true;
+  else if (key === 'fuse') S_.fuseBlown = true;
+  else S_.faults[key] = true;
+  log('Loaded: ' + ANSWERS[key].label + '.');
+  update();
+}
+function startMystery() {
+  clearFaults(); S_.olTripped = false; S_.fuseBlown = false; S_.power = true;
+  mystery = MYSTERY_POOL[Math.floor(Math.random() * MYSTERY_POOL.length)];
+  S_.faults[mystery] = true;
+  quiz.msg = ''; highlight('culprit', []);
+  log('Mystery fault injected. Operate the circuit and find it with the meter.');
+  update(); renderWhatIf();
+}
+function endMystery() { mystery = null; }
+function renderWhatIf() {
+  const p = $('pane_whatif');
+  p.innerHTML =
+    `<div class="myst"><b>Mystery fault challenge</b>
+       <div style="color:var(--muted);font-size:12.5px;margin:4px 0 8px">A random fault is hidden: no wire colours, no ✕ markers. Diagnose it with the buttons and the multimeter only.</div>
+       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+         <button class="btn primary" id="myStart">${mystery ? 'New mystery fault' : 'Inject mystery fault'}</button>
+         ${mystery ? `<select id="mySel"><option value="">My diagnosis…</option>${MYSTERY_POOL.map(k => `<option value="${k}">${FAULTS[k].label}</option>`).join('')}</select>
+         <button class="btn" id="myCheck">Check</button><button class="btn" id="myReveal">Reveal</button>` : ''}
+       </div>
+       <div class="fb ${quiz.msg ? quiz.msgCls : ''}">${quiz.msg}</div>
+     </div>
+     <div style="color:var(--muted);font:600 11px var(--mono);letter-spacing:1px;margin-bottom:6px">SYMPTOM → CAUSE  ·  score ${quiz.solved.size}/${SCENARIOS.length}</div>` +
+    SCENARIOS.map((s, i) => {
+      const pick = quiz.picked[i], right = pick === s.answer;
+      return `<div class="scn ${quiz.open === i ? 'open' : ''} ${quiz.solved.has(i) ? 'solved' : ''}">
+        <button data-open="${i}">${i + 1}. ${s.title}</button>
+        <div class="in"><p class="clue">${s.clue}</p>
+          <div class="opts">${s.options.map(o =>
+            `<button class="btn ${pick === o ? (right ? 'ok' : 'no') : ''}" data-s="${i}" data-o="${o}">${ANSWERS[o].label}</button>`).join('')}</div>
+          <div class="fb ${pick ? (right ? 'ok' : 'no') : ''}">${!pick ? '' : right
+            ? '<b>Correct.</b> ' + s.why
+            : '<b>Not this one.</b> ' + ANSWERS[pick].sym + ' Compare that with the symptom and try again.'}</div>
+          <button class="btn" data-load="${i}">Load this fault into the simulator</button>
+        </div></div>`;
+    }).join('');
+
+  $('myStart').onclick = startMystery;
+  if (mystery) {
+    $('myCheck').onclick = () => {
+      const v = $('mySel').value; if (!v) return;
+      if (v === mystery) {
+        quiz.msg = '<b>Correct — ' + FAULTS[v].label + '.</b> ' + FAULTS[v].sym; quiz.msgCls = 'ok';
+        const comp = FAULTS[v].comp; endMystery(); update(); highlight('culprit', [comp]);
+      } else { quiz.msg = '<b>Not it.</b> ' + FAULTS[v].sym + ' Does that match what you measured?'; quiz.msgCls = 'no'; }
+      renderWhatIf();
+    };
+    $('myReveal').onclick = () => {
+      const k = mystery; quiz.msg = 'It was: <b>' + FAULTS[k].label + '.</b> ' + FAULTS[k].sym; quiz.msgCls = 'no';
+      endMystery(); update(); highlight('culprit', [FAULTS[k].comp]); renderWhatIf();
+    };
+  }
+  p.querySelectorAll('[data-open]').forEach(b => b.onclick = () => {
+    quiz.open = quiz.open === +b.dataset.open ? -1 : +b.dataset.open; highlight('culprit', []); renderWhatIf();
+  });
+  p.querySelectorAll('[data-o]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.s, o = b.dataset.o;
+    quiz.picked[i] = o;
+    if (o === SCENARIOS[i].answer) { quiz.solved.add(i); highlight('culprit', [ANSWERS[o].comp]); } else highlight('culprit', []);
+    renderWhatIf();
+  });
+  p.querySelectorAll('[data-load]').forEach(b => b.onclick = () => { loadCondition(SCENARIOS[+b.dataset.load].answer); renderWhatIf(); });
+}
+
+/* ---------- tab: blindfold terminal map ---------- */
+const tmap = { blind: false, checked: false };
+function renderMap() {
+  const p = $('pane_map');
+  p.innerHTML =
+    `<div class="nav">
+       <button class="btn primary" id="tmBlind">${tmap.blind ? 'Show answers (study)' : 'Blindfold me'}</button>
+       ${tmap.blind ? '<button class="btn" id="tmCheck">Check</button>' : ''}
+       <label class="switch" style="font-weight:500;font-size:12.5px"><input type="checkbox" id="tmHide" ${svg.classList.contains('hidenums') ? 'checked' : ''}>Hide numbers on schematic</label>
+       <span class="sp" id="tmScore"></span>
+     </div>
+     <table class="tm"><tr><th>Device</th><th>Type</th><th>Terminals</th></tr>${TERMMAP.map((r, i) =>
+       `<tr><td>${r.dev}<div class="note">${tmap.blind ? '' : r.note}</div></td><td><span class="tag">${r.type}</span></td>
+        <td>${r.ans.map((a, j) => tmap.blind
+          ? `<input data-r="${i}" data-j="${j}" maxlength="3" autocomplete="off" spellcheck="false">`
+          : `<span class="num">${a}</span>`).join('')}</td></tr>`).join('')}</table>
+     <ul class="rules">
+       <li><b>Last digit = function.</b> 1–2 is NC, 3–4 is NO. 5–6 / 7–8 are NC / NO with a special function (overload, timed).</li>
+       <li><b>First digit = position.</b> 13/14 is the first pole, 23/24 the second, and so on. Overload contacts use 9: 95/96 NC, 97/98 NO.</li>
+       <li><b>Coils are A1 / A2.</b> On DC, A1 is positive; the diode cathode follows A1.</li>
+       <li><b>NEMA three-wire:</b> wires 1, 2, 3 — the seal-in contact always lands on 2 and 3.</li>
+     </ul>`;
+  $('tmBlind').onclick = () => { tmap.blind = !tmap.blind; renderMap(); };
+  $('tmHide').onchange = e => svg.classList.toggle('hidenums', e.target.checked);
+  if (tmap.blind) $('tmCheck').onclick = () => {
+    let ok = 0, n = 0;
+    p.querySelectorAll('input[data-r]').forEach(inp => {
+      const good = inp.value.trim().toUpperCase() === TERMMAP[+inp.dataset.r].ans[+inp.dataset.j];
+      inp.classList.toggle('ok', good); inp.classList.toggle('no', !good); n++; if (good) ok++;
+    });
+    $('tmScore').textContent = `${ok} / ${n} correct`;
+  };
+}
+
+/* ---------- tabs + tooltip ---------- */
+function buildTabs() {
+  $('tabs').addEventListener('click', e => {
+    const t = e.target.dataset.tab; if (!t) return;
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('sel', b.dataset.tab === t));
+    document.querySelectorAll('.pane').forEach(pn => pn.classList.toggle('sel', pn.id === 'pane_' + t));
+    highlight('trace', t === 'trace' ? TRACE_STEPS[traceIdx].hl : []);
+    highlight('culprit', []);
+  });
+  renderTrace(); renderWhatIf(); renderMap();
+}
+function buildTooltip() {
+  const tip = $('tip');
+  document.addEventListener('mousemove', e => {
+    const t = e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (!t) { tip.classList.remove('show'); return; }
+    // don't leak terminal numbers through the tooltip while they are hidden
+    tip.textContent = t.dataset.term && svg.classList.contains('hidenums') ? 'Terminal — click to place a meter lead' : t.dataset.tip;
+    tip.classList.add('show');
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - w - 8) + 'px';
+    tip.style.top = (e.clientY + 18 + h > innerHeight ? e.clientY - h - 10 : e.clientY + 18) + 'px';
+  });
+}
+
+buildSchematic(); buildPanel(); buildMeter(); buildTabs(); buildTooltip();
+update();
+})();
+</script>
+</body>
+</html>
